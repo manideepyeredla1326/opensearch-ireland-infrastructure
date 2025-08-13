@@ -9,17 +9,17 @@ pipeline {
         )
         string(
             name: 'AWS_REGION',
-            defaultValue: 'eu-west-1',
+            defaultValue: 'us-east-1',
             description: 'AWS region for the cluster'
         )
         string(
             name: 'DOMAIN_NAME',
-            defaultValue: 'imiconnect-uk-prod',
+            defaultValue: 'connect-qa-new',
             description: 'Name of the OpenSearch domain'
         )
         string(
             name: 'AWS_PROFILE',
-            defaultValue: 'default',
+            defaultValue: 'imiconnect-qa',
             description: 'AWS profile name to use for credentials'
         )
         booleanParam(
