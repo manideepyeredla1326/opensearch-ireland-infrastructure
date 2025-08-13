@@ -9,17 +9,17 @@ pipeline {
         )
         string(
             name: 'AWS_REGION',
-            defaultValue: 'eu-west-1',
+            defaultValue: 'us-east-1',
             description: 'AWS region for the cluster'
         )
         string(
             name: 'DOMAIN_NAME',
-            defaultValue: 'imiconnect-uk-prod',
+            defaultValue: 'connect-qa-new',
             description: 'Name of the OpenSearch domain'
         )
         string(
             name: 'AWS_PROFILE',
-            defaultValue: 'default',
+            defaultValue: 'imiconnect-qa',
             description: 'AWS profile name to use for credentials'
         )
         booleanParam(
@@ -31,6 +31,7 @@ pipeline {
     
     environment {
         AWS_DEFAULT_REGION = "${params.AWS_REGION}"
+        AWS_PROFILE = "${params.AWS_PROFILE}"
         STATE_REPO_PATH = "../opensearch-terraform-state"
         GPG_RECIPIENT = 'myeredla@cisco.com'
         PATH = "${env.WORKSPACE}:${env.PATH}"
@@ -53,35 +54,70 @@ pipeline {
                     echo ""
                     echo "Expected tfvars file: regions/''' + params.AWS_REGION + '''/''' + params.DOMAIN_NAME + '''.tfvars"
                     echo ""
-                    echo "Directory contents:"
-                    ls -la
-                    echo ""
-                    echo "Looking for terraform files:"
-                    find . -name "*.tf" -type f || echo "No .tf files found"
-                    echo ""
-                    echo "Looking for regions directory:"
-                    if [ -d "regions" ]; then
-                        echo "✅ regions directory found"
-                        echo "Regions directory structure:"
-                        find regions -type f -name "*.tfvars" 2>/dev/null || echo "No .tfvars files found in regions"
-                    else
-                        echo "❌ regions directory not found"
-                    fi
-                    echo ""
-                    echo "Looking for scripts directory:"
-                    if [ -d "scripts" ]; then
-                        echo "✅ scripts directory found"
-                        echo "Scripts:"
-                        ls -la scripts/
-                    else
-                        echo "❌ scripts directory not found"
-                    fi
-                    echo ""
                     echo "Environment variables:"
                     echo "AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}"
+                    echo "AWS_PROFILE: ${AWS_PROFILE}"
                     echo "STATE_REPO_PATH: ${STATE_REPO_PATH}"
                     echo "PATH: ${PATH}"
                     echo "=========================="
+                '''
+            }
+        }
+        
+        stage('Setup Tools') {
+            steps {
+                sh '''
+                    echo "Setting up Terraform..."
+                    if ! command -v terraform &> /dev/null; then
+                        echo "Downloading Terraform..."
+                        curl -LO https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_darwin_amd64.zip
+                        unzip -o terraform_1.6.0_darwin_amd64.zip
+                        chmod +x terraform
+                    fi
+                    
+                    echo "Verifying tools..."
+                    export PATH=$PWD:$PATH
+                    terraform version
+                    
+                    # Verify AWS CLI and profile
+                    if command -v aws &> /dev/null; then
+                        echo "✅ AWS CLI found"
+                        aws --version
+                    else
+                        echo "❌ AWS CLI not found"
+                        exit 1
+                    fi
+                    
+                    echo "✅ All tools ready"
+                '''
+            }
+        }
+        
+        stage('Verify AWS Access') {
+            steps {
+                sh '''
+                    echo "Verifying AWS access with profile: $AWS_PROFILE"
+                    
+                    # Test AWS connectivity with specific profile
+                    if aws sts get-caller-identity --profile "$AWS_PROFILE" --region "$AWS_DEFAULT_REGION"; then
+                        echo "✅ AWS access verified with profile $AWS_PROFILE"
+                    else
+                        echo "❌ AWS access failed with profile $AWS_PROFILE"
+                        echo ""
+                        echo "Available AWS profiles:"
+                        aws configure list-profiles || echo "No profiles found"
+                        echo ""
+                        echo "Please ensure:"
+                        echo "1. Profile '$AWS_PROFILE' exists"
+                        echo "2. You're authenticated (may need to refresh ADFS token)"
+                        exit 1
+                    fi
+                    
+                    # Test OpenSearch access
+                    echo "Testing OpenSearch access..."
+                    aws opensearch list-domain-names --region "$AWS_DEFAULT_REGION" --profile "$AWS_PROFILE" || {
+                        echo "⚠️ Cannot list OpenSearch domains (may be normal if no permissions)"
+                    }
                 '''
             }
         }
@@ -102,86 +138,6 @@ pipeline {
             }
         }
         
-        stage('Setup Tools') {
-            steps {
-                sh '''
-                    echo "Setting up Terraform..."
-                    if ! command -v terraform &> /dev/null; then
-                        echo "Terraform not found, downloading..."
-                        rm -rf terraform_1.6.0_darwin_amd64.zip terraform
-                        
-                        # Use curl if wget is not available
-                        if command -v wget &> /dev/null; then
-                            wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_darwin_amd64.zip
-                        else
-                            curl -LO https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_darwin_amd64.zip
-                        fi
-                        
-                        unzip -o terraform_1.6.0_darwin_amd64.zip
-                        chmod +x terraform
-                        
-                        # Add to PATH
-                        export PATH=$PWD:$PATH
-                        echo "Terraform downloaded and added to PATH"
-                    else
-                        echo "Terraform already available"
-                    fi
-                    
-                    # Verify terraform installation
-                    terraform version
-                '''
-            }
-        }
-        
-        stage('Import Existing Cluster') {
-            when {
-                expression { params.OPERATION == 'import' }
-            }
-            environment {
-                DOMAIN_NAME = "${params.DOMAIN_NAME}"
-                AWS_REGION = "${params.AWS_REGION}"
-                TF_VAR_FILE = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
-            }
-            steps {
-                sh '''
-                    echo "Importing existing cluster..."
-                    
-                    # Set up PATH to include terraform
-                    export PATH=$PWD:$PATH
-                    
-                    echo "Running import with parameters:"
-                    echo "  Domain Name: $DOMAIN_NAME"
-                    echo "  AWS Region: $AWS_REGION"
-                    echo "  TF Var File: $TF_VAR_FILE"
-                    
-                    # Check if tfvars file exists
-                    if [ ! -f "$TF_VAR_FILE" ]; then
-                        echo "ERROR: TF var file not found: $TF_VAR_FILE"
-                        echo ""
-                        echo "Available tfvars files:"
-                        find . -name "*.tfvars" -type f 2>/dev/null || echo "No .tfvars files found"
-                        echo ""
-                        echo "Expected file structure:"
-                        echo "  regions/"
-                        echo "    └── $AWS_REGION/"
-                        echo "        └── $DOMAIN_NAME.tfvars"
-                        exit 1
-                    fi
-                    
-                    # Check if import script exists
-                    if [ -f "scripts/import-existing-cluster.sh" ]; then
-                        chmod +x scripts/import-existing-cluster.sh
-                        
-                        # Execute the import script with environment variables
-                        ./scripts/import-existing-cluster.sh "$DOMAIN_NAME" "$AWS_REGION" "$TF_VAR_FILE"
-                    else
-                        echo "ERROR: import-existing-cluster.sh script not found"
-                        exit 1
-                    fi
-                '''
-            }
-        }
-        
         stage('Validate tfvars File') {
             when {
                 expression { params.OPERATION in ['validate', 'plan', 'apply'] }
@@ -197,18 +153,13 @@ pipeline {
                     echo "Expected file: $TF_VAR_FILE"
                     
                     if [ ! -f "$TF_VAR_FILE" ]; then
-                        echo "ERROR: tfvars file not found: $TF_VAR_FILE"
+                        echo "❌ ERROR: tfvars file not found: $TF_VAR_FILE"
                         echo ""
                         echo "Available files in regions directory:"
                         find regions -name "*.tfvars" 2>/dev/null || echo "No tfvars files found"
                         echo ""
                         echo "Directory structure:"
                         find regions -type d 2>/dev/null || echo "No regions directory found"
-                        echo ""
-                        echo "Expected structure:"
-                        echo "  regions/"
-                        echo "    └── $AWS_REGION/"
-                        echo "        └── $DOMAIN_NAME.tfvars"
                         exit 1
                     else
                         echo "✅ tfvars file found: $TF_VAR_FILE"
@@ -222,6 +173,60 @@ pipeline {
             }
         }
         
+        stage('Import Existing Cluster') {
+            when {
+                expression { params.OPERATION == 'import' }
+            }
+            environment {
+                DOMAIN_NAME = "${params.DOMAIN_NAME}"
+                AWS_REGION = "${params.AWS_REGION}"
+                TF_VAR_FILE = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
+                AWS_PROFILE = "${params.AWS_PROFILE}"
+            }
+            steps {
+                sh '''
+                    echo "Importing OpenSearch cluster..."
+                    echo "Domain: $DOMAIN_NAME"
+                    echo "Region: $AWS_REGION"
+                    echo "TF Var File: $TF_VAR_FILE"
+                    echo "AWS Profile: $AWS_PROFILE"
+                    
+                    # Set up PATH for terraform
+                    export PATH=$PWD:$PATH
+                    
+                    # Verify tools are available
+                    terraform version
+                    aws --version
+                    
+                    # Test AWS access for this specific domain
+                    echo "Checking if domain exists..."
+                    if aws opensearch describe-domain --domain-name "$DOMAIN_NAME" --region "$AWS_REGION" --profile "$AWS_PROFILE"; then
+                        echo "✅ Domain $DOMAIN_NAME found in region $AWS_REGION"
+                    else
+                        echo "❌ Cannot access domain $DOMAIN_NAME in region $AWS_REGION"
+                        echo "Please check domain name and your AWS permissions"
+                        exit 1
+                    fi
+                    
+                    # Check tfvars file
+                    if [ ! -f "$TF_VAR_FILE" ]; then
+                        echo "❌ TF var file not found: $TF_VAR_FILE"
+                        echo "Please create this file first"
+                        exit 1
+                    fi
+                    
+                    # Run import script
+                    if [ -f "scripts/import-existing-cluster.sh" ]; then
+                        chmod +x scripts/import-existing-cluster.sh
+                        ./scripts/import-existing-cluster.sh "$DOMAIN_NAME" "$AWS_REGION" "$TF_VAR_FILE"
+                    else
+                        echo "❌ Import script not found: scripts/import-existing-cluster.sh"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+        
         stage('Initialize') {
             when {
                 expression { params.OPERATION in ['validate', 'plan', 'apply'] }
@@ -229,13 +234,8 @@ pipeline {
             steps {
                 sh '''
                     echo "Initializing Terraform..."
-                    
-                    # Set up PATH to include terraform
                     export PATH=$PWD:$PATH
-                    
-                    # Initialize terraform in current directory (not in terraform subdirectory)
                     terraform init -input=false
-                    
                     echo "Terraform initialization completed"
                 '''
             }
@@ -248,14 +248,9 @@ pipeline {
             steps {
                 sh '''
                     echo "Running validation..."
-                    
-                    # Set up PATH to include terraform
                     export PATH=$PWD:$PATH
-                    
-                    # Run terraform validate
                     terraform validate
                     
-                    # Run custom validation script if it exists
                     if [ -f "scripts/validate-deployment.sh" ]; then
                         chmod +x scripts/validate-deployment.sh
                         ./scripts/validate-deployment.sh
@@ -282,10 +277,7 @@ pipeline {
                     echo "Region: $AWS_REGION"
                     echo "TF Var File: $TF_VAR_FILE"
                     
-                    # Set up PATH to include terraform
                     export PATH=$PWD:$PATH
-                    
-                    # Run terraform plan
                     terraform plan \
                         -var-file="$TF_VAR_FILE" \
                         -out=tfplan \
@@ -304,7 +296,6 @@ pipeline {
                 DOMAIN_NAME = "${params.DOMAIN_NAME}"
                 AWS_REGION = "${params.AWS_REGION}"
                 TF_VAR_FILE = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
-                AUTO_APPROVE = "${params.AUTO_APPROVE}"
             }
             steps {
                 script {
@@ -325,16 +316,8 @@ pipeline {
                     if (userInput) {
                         sh '''
                             echo "Applying Terraform changes..."
-                            echo "Domain: $DOMAIN_NAME"
-                            echo "Region: $AWS_REGION" 
-                            echo "TF Var File: $TF_VAR_FILE"
-                            
-                            # Set up PATH to include terraform
                             export PATH=$PWD:$PATH
-                            
-                            # Apply terraform changes
                             terraform apply -input=false tfplan
-                            
                             echo "Terraform apply completed"
                         '''
                         
@@ -365,7 +348,7 @@ pipeline {
                         chmod +x scripts/backup-state-to-github.sh
                         ./scripts/backup-state-to-github.sh
                     else
-                        echo "ERROR: backup-state-to-github.sh script not found"
+                        echo "❌ ERROR: backup-state-to-github.sh script not found"
                         exit 1
                     fi
                 '''
@@ -376,7 +359,6 @@ pipeline {
     post {
         always {
             script {
-                // Archive artifacts with better error handling
                 try {
                     archiveArtifacts artifacts: 'backup-*.json', allowEmptyArchive: true
                 } catch (Exception e) {
@@ -417,34 +399,13 @@ pipeline {
             script {
                 echo "❌ Pipeline failed during '${params.OPERATION}' operation for domain '${params.DOMAIN_NAME}'"
                 echo "Check the logs above for detailed error information"
-                
-                // Display some debugging information
-                sh '''
-                    echo "=== FAILURE DEBUG INFO ==="
-                    echo "Current directory: $(pwd)"
-                    echo "Directory contents:"
-                    ls -la || echo "Could not list directory"
-                    echo ""
-                    echo "Terraform files:"
-                    find . -name "*.tf" -type f || echo "No .tf files found"
-                    echo ""
-                    echo "Terraform state files:"
-                    find . -name "*.tfstate*" -type f || echo "No state files found"
-                    echo ""
-                    echo "Scripts directory:"
-                    ls -la scripts/ || echo "Scripts directory not found"
-                    echo "=========================="
-                '''
             }
         }
         
         cleanup {
-            // Clean up temporary files
             sh '''
                 echo "Cleaning up temporary files..."
                 rm -f terraform_1.6.0_darwin_amd64.zip
-                # Keep terraform binary for potential reuse
-                # rm -f terraform
             '''
         }
     }
