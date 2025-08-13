@@ -40,10 +40,9 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                
                 sh '''
                     if [ ! -d "$STATE_REPO_PATH" ]; then
-                        git clone https://github5.cisco.com/webexdba/opensearch-terraform-state.git $STATE_REPO_PATH
+                        git clone https://github.com/manideepyeredla1326/opensearch-ireland-infrastructure.git $STATE_REPO_PATH
                     else
                         cd $STATE_REPO_PATH && git pull origin main
                     fi
@@ -55,9 +54,9 @@ pipeline {
             steps {
                 sh '''
                     if ! command -v terraform &> /dev/null; then
-                        wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
-                        unzip terraform_1.6.0_linux_amd64.zip
-                        sudo mv terraform /usr/local/bin/
+                        /opt/homebrew/bin/wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_darwin_amd64.zip
+                        unzip -o terraform_1.6.0_darwin_amd64.zip
+                        export PATH=$PWD:$PATH
                     fi
                     terraform version
                 '''
@@ -69,15 +68,10 @@ pipeline {
                 expression { params.OPERATION == 'import' }
             }
             steps {
-                withAWS(credentials: "${params.AWS_PROFILE}") {
-                    withCredentials([string(credentialsId: 'gpg-public-key', variable: 'GPG_PUBLIC_KEY')]) {
-                        sh '''
-                            echo "$GPG_PUBLIC_KEY" | gpg --import
-                            chmod +x scripts/import-existing-cluster.sh
-                            ./scripts/import-existing-cluster.sh "${params.DOMAIN_NAME}" "${params.AWS_REGION}" "${TF_VAR_file}"
-                        '''
-                    }
-                }
+                sh '''
+                    chmod +x scripts/import-existing-cluster.sh
+                    ./scripts/import-existing-cluster.sh "${params.DOMAIN_NAME}" "${params.AWS_REGION}" "${TF_VAR_file}"
+                '''
             }
         }
         
@@ -87,9 +81,7 @@ pipeline {
             }
             steps {
                 dir('terraform') {
-                    withAWS(credentials: "${params.AWS_PROFILE}") {
-                        sh 'terraform init -input=false'
-                    }
+                    sh 'terraform init -input=false'
                 }
             }
         }
@@ -99,29 +91,25 @@ pipeline {
                 expression { params.OPERATION == 'validate' }
             }
             steps {
-                withAWS(credentials: "${params.AWS_PROFILE}") {
-                    sh '''
-                        chmod +x scripts/validate-deployment.sh
-                        ./scripts/validate-deployment.sh
-                    '''
-                }
+                sh '''
+                    chmod +x scripts/validate-deployment.sh
+                    ./scripts/validate-deployment.sh
+                '''
             }
         }
         
         stage('Plan') {
             when {
-                expression { params.OPERATION in ['plan', 'apply'] }
+                expression { params.OPERATION in ['validate', 'plan', 'apply'] }
             }
             steps {
                 dir('terraform') {
-                    withAWS(credentials: "${params.AWS_PROFILE}") {
-                        sh '''
-                            terraform plan \
-                                -var-file="../${TF_VAR_file}" \
-                                -out=tfplan \
-                                -input=false
-                        '''
-                    }
+                    sh '''
+                        terraform plan \
+                            -var-file="../${TF_VAR_file}" \
+                            -out=tfplan \
+                            -input=false
+                    '''
                 }
             }
         }
@@ -148,17 +136,13 @@ pipeline {
                     
                     if (userInput) {
                         dir('terraform') {
-                            withAWS(credentials: "${params.AWS_PROFILE}") {
-                                sh 'terraform apply -input=false tfplan'
-                            }
+                            sh 'terraform apply -input=false tfplan'
                         }
                         
-                        withCredentials([string(credentialsId: 'gpg-public-key', variable: 'GPG_PUBLIC_KEY')]) {
-                            sh '''
-                                echo "$GPG_PUBLIC_KEY" | gpg --import
-                                ./scripts/backup-state-to-github.sh
-                            '''
-                        }
+                        sh '''
+                            chmod +x scripts/backup-state-to-github.sh
+                            ./scripts/backup-state-to-github.sh
+                        '''
                     }
                 }
             }
@@ -169,13 +153,10 @@ pipeline {
                 expression { params.OPERATION == 'backup-state' }
             }
             steps {
-                withCredentials([string(credentialsId: 'gpg-public-key', variable: 'GPG_PUBLIC_KEY')]) {
-                    sh '''
-                        echo "$GPG_PUBLIC_KEY" | gpg --import
-                        chmod +x scripts/backup-state-to-github.sh
-                        ./scripts/backup-state-to-github.sh
-                    '''
-                }
+                sh '''
+                    chmod +x scripts/backup-state-to-github.sh
+                    ./scripts/backup-state-to-github.sh
+                '''
             }
         }
     }
