@@ -31,7 +31,6 @@ pipeline {
     
     environment {
         AWS_DEFAULT_REGION = "${params.AWS_REGION}"
-        TF_VAR_file = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
         STATE_REPO_PATH = "../opensearch-terraform-state"
         GPG_RECIPIENT = 'myeredla@cisco.com'
         PATH = "${env.WORKSPACE}:${env.PATH}"
@@ -44,6 +43,16 @@ pipeline {
                     echo "=== WORKSPACE DEBUG INFO ==="
                     echo "Current directory: $(pwd)"
                     echo "Workspace: ${WORKSPACE}"
+                    echo ""
+                    echo "Pipeline Parameters:"
+                    echo "  OPERATION: ''' + params.OPERATION + '''"
+                    echo "  DOMAIN_NAME: ''' + params.DOMAIN_NAME + '''"
+                    echo "  AWS_REGION: ''' + params.AWS_REGION + '''"
+                    echo "  AWS_PROFILE: ''' + params.AWS_PROFILE + '''"
+                    echo "  AUTO_APPROVE: ''' + params.AUTO_APPROVE + '''"
+                    echo ""
+                    echo "Expected tfvars file: regions/''' + params.AWS_REGION + '''/''' + params.DOMAIN_NAME + '''.tfvars"
+                    echo ""
                     echo "Directory contents:"
                     ls -la
                     echo ""
@@ -51,12 +60,27 @@ pipeline {
                     find . -name "*.tf" -type f || echo "No .tf files found"
                     echo ""
                     echo "Looking for regions directory:"
-                    find . -name "regions" -type d || echo "No regions directory found"
+                    if [ -d "regions" ]; then
+                        echo "✅ regions directory found"
+                        echo "Regions directory structure:"
+                        find regions -type f -name "*.tfvars" 2>/dev/null || echo "No .tfvars files found in regions"
+                    else
+                        echo "❌ regions directory not found"
+                    fi
+                    echo ""
+                    echo "Looking for scripts directory:"
+                    if [ -d "scripts" ]; then
+                        echo "✅ scripts directory found"
+                        echo "Scripts:"
+                        ls -la scripts/
+                    else
+                        echo "❌ scripts directory not found"
+                    fi
                     echo ""
                     echo "Environment variables:"
-                    echo "TF_VAR_file: ${TF_VAR_file}"
                     echo "AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}"
                     echo "STATE_REPO_PATH: ${STATE_REPO_PATH}"
+                    echo "PATH: ${PATH}"
                     echo "=========================="
                 '''
             }
@@ -116,7 +140,7 @@ pipeline {
             environment {
                 DOMAIN_NAME = "${params.DOMAIN_NAME}"
                 AWS_REGION = "${params.AWS_REGION}"
-                TF_VAR_FILE = "${env.TF_VAR_file}"
+                TF_VAR_FILE = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
             }
             steps {
                 sh '''
@@ -125,14 +149,28 @@ pipeline {
                     # Set up PATH to include terraform
                     export PATH=$PWD:$PATH
                     
+                    echo "Running import with parameters:"
+                    echo "  Domain Name: $DOMAIN_NAME"
+                    echo "  AWS Region: $AWS_REGION"
+                    echo "  TF Var File: $TF_VAR_FILE"
+                    
+                    # Check if tfvars file exists
+                    if [ ! -f "$TF_VAR_FILE" ]; then
+                        echo "ERROR: TF var file not found: $TF_VAR_FILE"
+                        echo ""
+                        echo "Available tfvars files:"
+                        find . -name "*.tfvars" -type f 2>/dev/null || echo "No .tfvars files found"
+                        echo ""
+                        echo "Expected file structure:"
+                        echo "  regions/"
+                        echo "    └── $AWS_REGION/"
+                        echo "        └── $DOMAIN_NAME.tfvars"
+                        exit 1
+                    fi
+                    
                     # Check if import script exists
                     if [ -f "scripts/import-existing-cluster.sh" ]; then
                         chmod +x scripts/import-existing-cluster.sh
-                        
-                        echo "Running import with parameters:"
-                        echo "  Domain Name: $DOMAIN_NAME"
-                        echo "  AWS Region: $AWS_REGION"
-                        echo "  TF Var File: $TF_VAR_FILE"
                         
                         # Execute the import script with environment variables
                         ./scripts/import-existing-cluster.sh "$DOMAIN_NAME" "$AWS_REGION" "$TF_VAR_FILE"
@@ -148,18 +186,37 @@ pipeline {
             when {
                 expression { params.OPERATION in ['validate', 'plan', 'apply'] }
             }
+            environment {
+                DOMAIN_NAME = "${params.DOMAIN_NAME}"
+                AWS_REGION = "${params.AWS_REGION}"
+                TF_VAR_FILE = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
+            }
             steps {
                 sh '''
                     echo "Validating tfvars file..."
-                    if [ ! -f "${TF_VAR_file}" ]; then
-                        echo "ERROR: tfvars file not found: ${TF_VAR_file}"
+                    echo "Expected file: $TF_VAR_FILE"
+                    
+                    if [ ! -f "$TF_VAR_FILE" ]; then
+                        echo "ERROR: tfvars file not found: $TF_VAR_FILE"
+                        echo ""
                         echo "Available files in regions directory:"
                         find regions -name "*.tfvars" 2>/dev/null || echo "No tfvars files found"
+                        echo ""
+                        echo "Directory structure:"
+                        find regions -type d 2>/dev/null || echo "No regions directory found"
+                        echo ""
+                        echo "Expected structure:"
+                        echo "  regions/"
+                        echo "    └── $AWS_REGION/"
+                        echo "        └── $DOMAIN_NAME.tfvars"
                         exit 1
                     else
-                        echo "tfvars file found: ${TF_VAR_file}"
-                        echo "Contents:"
-                        cat "${TF_VAR_file}"
+                        echo "✅ tfvars file found: $TF_VAR_FILE"
+                        echo ""
+                        echo "File contents:"
+                        echo "=============="
+                        cat "$TF_VAR_FILE"
+                        echo "=============="
                     fi
                 '''
             }
@@ -213,16 +270,24 @@ pipeline {
             when {
                 expression { params.OPERATION in ['validate', 'plan', 'apply'] }
             }
+            environment {
+                DOMAIN_NAME = "${params.DOMAIN_NAME}"
+                AWS_REGION = "${params.AWS_REGION}"
+                TF_VAR_FILE = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
+            }
             steps {
                 sh '''
                     echo "Running Terraform plan..."
+                    echo "Domain: $DOMAIN_NAME"
+                    echo "Region: $AWS_REGION"
+                    echo "TF Var File: $TF_VAR_FILE"
                     
                     # Set up PATH to include terraform
                     export PATH=$PWD:$PATH
                     
                     # Run terraform plan
                     terraform plan \
-                        -var-file="${TF_VAR_file}" \
+                        -var-file="$TF_VAR_FILE" \
                         -out=tfplan \
                         -input=false
                     
@@ -238,7 +303,7 @@ pipeline {
             environment {
                 DOMAIN_NAME = "${params.DOMAIN_NAME}"
                 AWS_REGION = "${params.AWS_REGION}"
-                TF_VAR_FILE = "${env.TF_VAR_file}"
+                TF_VAR_FILE = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
                 AUTO_APPROVE = "${params.AUTO_APPROVE}"
             }
             steps {
