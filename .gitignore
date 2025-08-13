@@ -1,0 +1,33 @@
+# Terraform state files (never commit unencrypted state)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform variable files with sensitive data
+*.auto.tfvars
+*secrets.tfvars
+
+# Terraform cache
+.terraform/
+.terraform.lock.hcl
+
+# Backup files
+backup-*.json
+
+# Temporary files
+*.tmp
+*.temp
+
+# GPG files
+*.gpg
+*.asc
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# State backup repository reference
+opensearch-terraform-state/
