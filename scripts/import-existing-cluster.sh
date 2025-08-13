@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-DOMAIN_NAME="connect-qa-new"
-REGION="us-east-1"
+# Accept command-line arguments
+DOMAIN_NAME=$1
+REGION=$2
+TF_VAR_FILE=$3
 STATE_REPO_PATH=${STATE_REPO_PATH:-"../opensearch-terraform-state"}
 
 echo "=== Starting Import Process ==="
@@ -33,8 +35,8 @@ echo "5. Setting up Secrets Manager..."
 SECRET_NAME="${DOMAIN_NAME}-master-credentials"
 if ! aws secretsmanager describe-secret --secret-id "$SECRET_NAME" --region $REGION > /dev/null 2>&1; then
     echo "Creating new secret..."
-    terraform apply -target=aws_secretsmanager_secret.master_credentials -var-file="../regions/eu-west-1/terraform.tfvars" -auto-approve
-    terraform apply -target=aws_secretsmanager_secret_version.master_credentials -var-file="../regions/eu-west-1/terraform.tfvars" -auto-approve
+    terraform apply -target=aws_secretsmanager_secret.master_credentials -var-file="../$TF_VAR_FILE" -auto-approve
+    terraform apply -target=aws_secretsmanager_secret_version.master_credentials -var-file="../$TF_VAR_FILE" -auto-approve
 fi
 
 # Step 6: Backup state to GitHub
