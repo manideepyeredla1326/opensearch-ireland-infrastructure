@@ -54,6 +54,7 @@ pipeline {
             steps {
                 sh '''
                     if ! command -v terraform &> /dev/null; then
+                        rm -f terraform_1.6.0_darwin_amd64.zip terraform
                         /opt/homebrew/bin/wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_darwin_amd64.zip
                         unzip -o terraform_1.6.0_darwin_amd64.zip
                         export PATH=$PWD:$PATH
