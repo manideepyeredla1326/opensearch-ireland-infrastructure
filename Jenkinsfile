@@ -9,17 +9,17 @@ pipeline {
         )
         string(
             name: 'AWS_REGION',
-            defaultValue: 'us-east-1',
+            defaultValue: 'eu-west-1',
             description: 'AWS region for the cluster'
         )
         string(
             name: 'DOMAIN_NAME',
-            defaultValue: 'connect-qa-new',
+            defaultValue: 'imiconnect-uk-prod',
             description: 'Name of the OpenSearch domain'
         )
         string(
             name: 'AWS_PROFILE',
-            defaultValue: 'imiconnect-qa',
+            defaultValue: 'default',
             description: 'AWS profile name to use for credentials'
         )
         booleanParam(
@@ -113,12 +113,29 @@ pipeline {
             when {
                 expression { params.OPERATION == 'import' }
             }
+            environment {
+                DOMAIN_NAME = "${params.DOMAIN_NAME}"
+                AWS_REGION = "${params.AWS_REGION}"
+                TF_VAR_FILE = "${env.TF_VAR_file}"
+            }
             steps {
                 sh '''
                     echo "Importing existing cluster..."
+                    
+                    # Set up PATH to include terraform
+                    export PATH=$PWD:$PATH
+                    
+                    # Check if import script exists
                     if [ -f "scripts/import-existing-cluster.sh" ]; then
                         chmod +x scripts/import-existing-cluster.sh
-                        ./scripts/import-existing-cluster.sh "${params.DOMAIN_NAME}" "${params.AWS_REGION}" "${TF_VAR_file}"
+                        
+                        echo "Running import with parameters:"
+                        echo "  Domain Name: $DOMAIN_NAME"
+                        echo "  AWS Region: $AWS_REGION"
+                        echo "  TF Var File: $TF_VAR_FILE"
+                        
+                        # Execute the import script with environment variables
+                        ./scripts/import-existing-cluster.sh "$DOMAIN_NAME" "$AWS_REGION" "$TF_VAR_FILE"
                     else
                         echo "ERROR: import-existing-cluster.sh script not found"
                         exit 1
@@ -218,6 +235,12 @@ pipeline {
             when {
                 expression { params.OPERATION == 'apply' }
             }
+            environment {
+                DOMAIN_NAME = "${params.DOMAIN_NAME}"
+                AWS_REGION = "${params.AWS_REGION}"
+                TF_VAR_FILE = "${env.TF_VAR_file}"
+                AUTO_APPROVE = "${params.AUTO_APPROVE}"
+            }
             steps {
                 script {
                     def userInput = true
@@ -237,6 +260,9 @@ pipeline {
                     if (userInput) {
                         sh '''
                             echo "Applying Terraform changes..."
+                            echo "Domain: $DOMAIN_NAME"
+                            echo "Region: $AWS_REGION" 
+                            echo "TF Var File: $TF_VAR_FILE"
                             
                             # Set up PATH to include terraform
                             export PATH=$PWD:$PATH
@@ -309,13 +335,13 @@ pipeline {
         success {
             script {
                 if (params.OPERATION == 'import') {
-                    echo "✅ OpenSearch cluster successfully imported into Terraform management"
+                    echo "✅ OpenSearch cluster '${params.DOMAIN_NAME}' successfully imported into Terraform management"
                 } else if (params.OPERATION == 'apply') {
-                    echo "✅ OpenSearch cluster changes applied successfully"
+                    echo "✅ OpenSearch cluster '${params.DOMAIN_NAME}' changes applied successfully"
                 } else if (params.OPERATION == 'plan') {
-                    echo "✅ Terraform plan completed successfully"
+                    echo "✅ Terraform plan for '${params.DOMAIN_NAME}' completed successfully"
                 } else if (params.OPERATION == 'validate') {
-                    echo "✅ Terraform validation completed successfully"
+                    echo "✅ Terraform validation for '${params.DOMAIN_NAME}' completed successfully"
                 } else if (params.OPERATION == 'backup-state') {
                     echo "✅ Terraform state backup completed successfully"
                 }
@@ -324,7 +350,7 @@ pipeline {
         
         failure {
             script {
-                echo "❌ Pipeline failed during ${params.OPERATION} operation"
+                echo "❌ Pipeline failed during '${params.OPERATION}' operation for domain '${params.DOMAIN_NAME}'"
                 echo "Check the logs above for detailed error information"
                 
                 // Display some debugging information
@@ -339,6 +365,9 @@ pipeline {
                     echo ""
                     echo "Terraform state files:"
                     find . -name "*.tfstate*" -type f || echo "No state files found"
+                    echo ""
+                    echo "Scripts directory:"
+                    ls -la scripts/ || echo "Scripts directory not found"
                     echo "=========================="
                 '''
             }
