@@ -7,7 +7,7 @@ REGION=$2
 TF_VAR_FILE=$3
 STATE_REPO_PATH=${STATE_REPO_PATH:-"../opensearch-terraform-state"}
 
-# Use AWS_PROFILE if set, otherwise use default
+# Use AWS_PROFILE if set
 AWS_PROFILE_FLAG=""
 if [ -n "${AWS_PROFILE}" ]; then
     AWS_PROFILE_FLAG="--profile ${AWS_PROFILE}"
@@ -22,53 +22,61 @@ if [ -z "$DOMAIN_NAME" ] || [ -z "$REGION" ] || [ -z "$TF_VAR_FILE" ]; then
     exit 1
 fi
 
-echo "=== Starting Import Process ==="
-echo "Domain: $DOMAIN_NAME"
-echo "Region: $REGION"
-echo "TF Var File: $TF_VAR_FILE"
-echo "State Repo Path: $STATE_REPO_PATH"
-if [ -n "${AWS_PROFILE}" ]; then
-    echo "AWS Profile: $AWS_PROFILE"
+# Store workspace root and make TF_VAR_FILE path absolute
+WORKSPACE_ROOT="$(pwd)"
+if [[ "$TF_VAR_FILE" != /* ]]; then
+    TF_VAR_FILE="$WORKSPACE_ROOT/$TF_VAR_FILE"
 fi
+
+# Terraform config directory
+TERRAFORM_DIR="$WORKSPACE_ROOT/terraform"
+
+echo "=== Starting Import Process ==="
+echo "Domain:          $DOMAIN_NAME"
+echo "Region:          $REGION"
+echo "TF Var File:     $TF_VAR_FILE"
+echo "Terraform Dir:   $TERRAFORM_DIR"
+echo "State Repo Path: $STATE_REPO_PATH"
+[ -n "${AWS_PROFILE}" ] && echo "AWS Profile:     $AWS_PROFILE"
 
 # Check prerequisites
 echo "Checking prerequisites..."
 
 if ! command -v terraform &> /dev/null; then
-    echo "❌ ERROR: Terraform not found in PATH"
+    echo "ERROR: Terraform not found in PATH"
     exit 1
 fi
 
 if ! command -v aws &> /dev/null; then
-    echo "❌ ERROR: AWS CLI not found in PATH"
+    echo "ERROR: AWS CLI not found in PATH"
     exit 1
 fi
 
 if ! command -v jq &> /dev/null; then
-    echo "❌ ERROR: jq not found. Install with: brew install jq"
+    echo "ERROR: jq not found. Install with: brew install jq"
+    exit 1
+fi
+
+if [ ! -d "$TERRAFORM_DIR" ]; then
+    echo "ERROR: terraform/ directory not found at $TERRAFORM_DIR"
     exit 1
 fi
 
 # Test AWS connectivity
 echo "Testing AWS connectivity..."
 if ! aws sts get-caller-identity --region "$REGION" $AWS_PROFILE_FLAG > /dev/null 2>&1; then
-    echo "❌ ERROR: Cannot connect to AWS. Check credentials and region."
-    if [ -n "${AWS_PROFILE}" ]; then
-        echo "Available profiles:"
-        aws configure list-profiles
-    fi
+    echo "ERROR: Cannot connect to AWS. Check credentials and region."
+    [ -n "${AWS_PROFILE}" ] && echo "Available profiles:" && aws configure list-profiles
     exit 1
 fi
-echo "✅ Prerequisites check completed"
+echo "Prerequisites check completed"
 
 # Auto-generate tfvars if it doesn't exist
 if [ ! -f "$TF_VAR_FILE" ]; then
-    echo "📝 tfvars not found. Auto-generating from existing AWS cluster..."
+    echo "tfvars not found. Auto-generating from existing AWS cluster..."
 
-    # Check domain exists in AWS first
     if ! aws opensearch describe-domain --domain-name "$DOMAIN_NAME" --region "$REGION" $AWS_PROFILE_FLAG > /dev/null 2>&1; then
-        echo "❌ ERROR: OpenSearch domain '$DOMAIN_NAME' not found in AWS region '$REGION'"
-        echo "Cannot generate tfvars - domain does not exist"
+        echo "ERROR: OpenSearch domain '$DOMAIN_NAME' not found in AWS region '$REGION'"
         exit 1
     fi
 
@@ -104,7 +112,7 @@ if [ ! -f "$TF_VAR_FILE" ]; then
     WARM_ENABLED=$(echo "$DOMAIN_INFO"     | jq -r '.DomainStatus.ClusterConfig.WarmEnabled // false')
     WARM_TYPE=$(echo "$DOMAIN_INFO"        | jq -r '.DomainStatus.ClusterConfig.WarmType // ""')
     WARM_COUNT=$(echo "$DOMAIN_INFO"       | jq -r '.DomainStatus.ClusterConfig.WarmCount // 0')
-    AZS=$(echo "$DOMAIN_INFO"             | jq -r '.DomainStatus.VPCOptions.AvailabilityZones // ["'$REGION'a"] | @json')
+    AZS=$(echo "$DOMAIN_INFO"              | jq -r '.DomainStatus.VPCOptions.AvailabilityZones // ["'$REGION'a"] | @json')
 
     cat > "$TF_VAR_FILE" << EOF
 domain_name    = "$DOMAIN_NAME"
@@ -147,36 +155,39 @@ kms_key_id        = "$KMS_KEY"
 tags = {}
 EOF
 
-    echo "✅ Generated tfvars at: $TF_VAR_FILE"
-    echo "📋 Review the file before proceeding: cat $TF_VAR_FILE"
+    echo "Generated tfvars at: $TF_VAR_FILE"
 else
-    echo "✅ tfvars file found: $TF_VAR_FILE"
+    echo "tfvars file found: $TF_VAR_FILE"
 fi
 
 # Step 1: Backup current configuration
 echo "1. Creating configuration backup..."
-BACKUP_FILE="backup-${DOMAIN_NAME}-$(date +%Y%m%d-%H%M%S).json"
+BACKUP_FILE="$WORKSPACE_ROOT/backup-${DOMAIN_NAME}-$(date +%Y%m%d-%H%M%S).json"
 if aws opensearch describe-domain --domain-name "$DOMAIN_NAME" --region "$REGION" $AWS_PROFILE_FLAG > "$BACKUP_FILE" 2>/dev/null; then
-    echo "✅ Configuration backed up to: $BACKUP_FILE"
+    echo "Configuration backed up to: $BACKUP_FILE"
 else
-    echo "⚠️ WARNING: Failed to backup domain config. Domain might not exist or access denied."
+    echo "WARNING: Failed to backup domain config."
 fi
+
+# All terraform commands run from the terraform/ directory
+cd "$TERRAFORM_DIR"
+echo "Working directory: $(pwd)"
 
 # Step 2: Initialize Terraform
 echo "2. Initializing Terraform..."
 if terraform init -input=false; then
-    echo "✅ Terraform initialized successfully"
+    echo "Terraform initialized successfully"
 else
-    echo "❌ ERROR: Terraform initialization failed"
+    echo "ERROR: Terraform initialization failed"
     exit 1
 fi
 
 # Step 3: Import domain
 echo "3. Importing OpenSearch domain..."
-if terraform import $([[ -f "$TF_VAR_FILE" ]] && echo "-var-file=$TF_VAR_FILE") aws_opensearch_domain.main "$DOMAIN_NAME" 2>/dev/null; then
-    echo "✅ OpenSearch domain imported successfully"
+if terraform import -var-file="$TF_VAR_FILE" aws_opensearch_domain.main "$DOMAIN_NAME"; then
+    echo "OpenSearch domain imported successfully"
 else
-    echo "⚠️ WARNING: Domain import failed (may already be imported, or domain doesn't exist)"
+    echo "WARNING: Domain import failed (may already be imported, or domain doesn't exist)"
 fi
 
 # Step 4: Import CloudWatch log groups
@@ -191,13 +202,13 @@ for i in "${!LOG_TYPES[@]}"; do
 
     if aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP_NAME" --region "$REGION" $AWS_PROFILE_FLAG \
         --query 'logGroups[?logGroupName==`'"$LOG_GROUP_NAME"'`]' --output text | grep -q "$LOG_GROUP_NAME"; then
-        if terraform import "aws_cloudwatch_log_group.${RESOURCE_NAME}" "$LOG_GROUP_NAME" 2>/dev/null; then
-            echo "✅ ${LOG_TYPE} logs imported"
+        if terraform import -var-file="$TF_VAR_FILE" "aws_cloudwatch_log_group.${RESOURCE_NAME}" "$LOG_GROUP_NAME"; then
+            echo "${LOG_TYPE} logs imported"
         else
-            echo "⚠️ ${LOG_TYPE} logs import failed (may already be imported)"
+            echo "WARNING: ${LOG_TYPE} logs import failed (may already be imported)"
         fi
     else
-        echo "ℹ️ Log group not found, skipping: $LOG_GROUP_NAME"
+        echo "Log group not found, skipping: $LOG_GROUP_NAME"
     fi
 done
 
@@ -205,20 +216,21 @@ done
 echo "5. Checking Secrets Manager..."
 SECRET_NAME="${DOMAIN_NAME}-master-credentials"
 if aws secretsmanager describe-secret --secret-id "$SECRET_NAME" --region "$REGION" $AWS_PROFILE_FLAG > /dev/null 2>&1; then
-    if terraform import aws_secretsmanager_secret.master_credentials "$SECRET_NAME" 2>/dev/null; then
-        echo "✅ Secret imported"
+    if terraform import -var-file="$TF_VAR_FILE" aws_secretsmanager_secret.master_credentials "$SECRET_NAME"; then
+        echo "Secret imported"
     else
-        echo "⚠️ Secret import failed (may already be imported)"
+        echo "WARNING: Secret import failed (may already be imported)"
     fi
 
     VERSION_ID=$(aws secretsmanager describe-secret --secret-id "$SECRET_NAME" --region "$REGION" $AWS_PROFILE_FLAG \
         --query 'VersionIdsToStages.keys(@)[0]' --output text 2>/dev/null)
     if [ -n "$VERSION_ID" ] && [ "$VERSION_ID" != "None" ]; then
-        terraform import "aws_secretsmanager_secret_version.master_credentials" "${SECRET_NAME}|${VERSION_ID}" 2>/dev/null \
-            && echo "✅ Secret version imported" || echo "⚠️ Secret version import failed"
+        terraform import -var-file="$TF_VAR_FILE" \
+            "aws_secretsmanager_secret_version.master_credentials" "${SECRET_NAME}|${VERSION_ID}" \
+            && echo "Secret version imported" || echo "WARNING: Secret version import failed"
     fi
 else
-    echo "ℹ️ No secret found: $SECRET_NAME"
+    echo "No secret found: $SECRET_NAME"
 fi
 
 # Step 6: Terraform plan
@@ -228,32 +240,35 @@ terraform plan -var-file="$TF_VAR_FILE" -out=import-plan -detailed-exitcode
 PLAN_EXIT_CODE=$?
 set -e
 case $PLAN_EXIT_CODE in
-    0) echo "✅ No changes needed - infrastructure matches configuration" ;;
-    2) echo "ℹ️ Plan generated with changes - review import-plan" ;;
-    *) echo "⚠️ Plan had issues (exit code: $PLAN_EXIT_CODE) - review output above" ;;
+    0) echo "No changes needed - infrastructure matches configuration" ;;
+    2) echo "Plan generated with changes - review import-plan" ;;
+    *) echo "WARNING: Plan had issues (exit code: $PLAN_EXIT_CODE) - review output above" ;;
 esac
+
+# Return to workspace root for backup script
+cd "$WORKSPACE_ROOT"
 
 # Step 7: Backup state
 echo "7. Backing up state..."
 if [ -f "scripts/backup-state-to-github.sh" ]; then
     chmod +x scripts/backup-state-to-github.sh
-    ./scripts/backup-state-to-github.sh && echo "✅ State backed up" || echo "⚠️ State backup failed"
+    ./scripts/backup-state-to-github.sh && echo "State backed up" || echo "WARNING: State backup failed"
 else
-    echo "ℹ️ No backup script found"
+    echo "No backup script found"
 fi
 
 echo ""
-echo "🎉 Import process completed!"
+echo "Import process completed!"
 echo ""
-echo "📋 Summary:"
+echo "Summary:"
 echo "  - Domain:  $DOMAIN_NAME"
 echo "  - Region:  $REGION"
 [ -f "$BACKUP_FILE" ] && echo "  - Backup:  $BACKUP_FILE"
-[ -f "import-plan" ] && echo "  - Plan:    import-plan"
+[ -f "$TERRAFORM_DIR/import-plan" ] && echo "  - Plan:    $TERRAFORM_DIR/import-plan"
 echo ""
-echo "📋 Next steps:"
-echo "  1. Review: terraform show import-plan"
+echo "Next steps:"
+echo "  1. Review: cd terraform && terraform show import-plan"
 echo "  2. Check for drift or missing resources"
 echo "  3. Run 'terraform apply' to align infrastructure with configuration"
 echo ""
-echo "⚠️  Review all imported resources before applying changes!"
+echo "IMPORTANT: Review all imported resources before applying changes!"
