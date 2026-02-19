@@ -27,7 +27,8 @@ gpg --trust-model always --encrypt --armor \
 # Navigate to state repository
 echo "2. Committing to GitHub..."
 cd "$STATE_REPO_PATH"
-git pull origin main || true
+git config pull.rebase false
+    git pull origin main || true
 
 # Copy encrypted state
 cp "/tmp/${ENCRYPTED_NAME}" "environments/${ENVIRONMENT}/encrypted-states/"
