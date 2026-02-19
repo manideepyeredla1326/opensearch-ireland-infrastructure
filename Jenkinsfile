@@ -98,10 +98,11 @@ pipeline {
                 expression { params.OPERATION == 'import' }
             }
             steps {
-                sh '''
+                sh """
+                    export PATH="$WORKSPACE/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH"
                     chmod +x scripts/import-existing-cluster.sh
-                    ./scripts/import-existing-cluster.sh "${params.DOMAIN_NAME}" "${params.AWS_REGION}" "${TF_VAR_file}"
-                '''
+                    ./scripts/import-existing-cluster.sh "${params.DOMAIN_NAME}" "${params.AWS_REGION}" "${env.TF_VAR_file}"
+                """
             }
         }
         
