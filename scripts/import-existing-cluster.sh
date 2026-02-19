@@ -24,8 +24,10 @@ fi
 
 # Store workspace root and make TF_VAR_FILE path absolute
 WORKSPACE_ROOT="$(pwd)"
+GIT_REPO="/Users/myeredla/Documents/opensearch-ireland-infrastructure"
+
 if [[ "$TF_VAR_FILE" != /* ]]; then
-    TF_VAR_FILE="$WORKSPACE_ROOT/$TF_VAR_FILE"
+    TF_VAR_FILE="$GIT_REPO/$TF_VAR_FILE"
 fi
 
 # Terraform config directory
