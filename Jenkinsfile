@@ -65,33 +65,39 @@ pipeline {
         }
         
         stage('Setup Tools') {
-            steps {
-                sh '''
-                    echo "Setting up Terraform..."
-                    if ! command -v terraform &> /dev/null; then
-                        echo "Downloading Terraform..."
-                        curl -LO https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_darwin_amd64.zip
-                        unzip -o terraform_1.6.0_darwin_amd64.zip
-                        chmod +x terraform
-                    fi
-                    
-                    echo "Verifying tools..."
-                    export PATH=$PWD:$PATH
-                    terraform version
-                    
-                    # Verify AWS CLI and profile
-                    if command -v aws &> /dev/null; then
-                        echo "✅ AWS CLI found"
-                        aws --version
-                    else
-                        echo "❌ AWS CLI not found"
-                        exit 1
-                    fi
-                    
-                    echo "✅ All tools ready"
-                '''
-            }
-        }
+    steps {
+        sh '''
+            if ! command -v terraform &> /dev/null; then
+                # Detect OS and architecture dynamically
+                OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+                ARCH=$(uname -m)
+                if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
+                if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
+
+                TF_ZIP="terraform_1.6.0_${OS}_${ARCH}.zip"
+                curl -LO "https://releases.hashicorp.com/terraform/1.6.0/${TF_ZIP}"
+
+                mkdir -p "$WORKSPACE/bin"
+                unzip -o "$TF_ZIP" -d "$WORKSPACE/bin"
+                chmod +x "$WORKSPACE/bin/terraform"
+                rm -f "$TF_ZIP"
+            fi
+
+            export PATH="$WORKSPACE/bin:$PATH"
+            terraform version
+
+            if command -v aws &> /dev/null; then
+                echo "✅ AWS CLI found"
+                aws --version
+            else
+                echo "❌ AWS CLI not found"
+                exit 1
+            fi
+
+            echo "✅ All tools ready"
+        '''
+    }
+}
         
         stage('Verify AWS Access') {
             steps {
