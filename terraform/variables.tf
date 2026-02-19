@@ -147,8 +147,3 @@ variable "aws_profile" {
   description = "AWS profile name to use"
   type        = string
 }
-
-variable "tags" {
-  description = "Resource tags"
-  type        = map(string)
-}
