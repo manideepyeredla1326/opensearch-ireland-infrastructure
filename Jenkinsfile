@@ -68,30 +68,38 @@ pipeline {
     steps {
         sh '''
             if ! command -v terraform &> /dev/null; then
-                # Detect OS and architecture dynamically
                 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
                 ARCH=$(uname -m)
                 if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
                 if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
 
-                TF_ZIP="terraform_1.6.0_${OS}_${ARCH}.zip"
-                curl -LO "https://releases.hashicorp.com/terraform/1.6.0/${TF_ZIP}"
-
+                TF_ZIP="terraform_1.9.8_${OS}_${ARCH}.zip"
+                curl -LO "https://releases.hashicorp.com/terraform/1.9.8/${TF_ZIP}"
                 mkdir -p "$WORKSPACE/bin"
                 unzip -o "$TF_ZIP" -d "$WORKSPACE/bin"
                 chmod +x "$WORKSPACE/bin/terraform"
                 rm -f "$TF_ZIP"
             fi
 
-            export PATH="$WORKSPACE/bin:$PATH"
+            # Add common AWS CLI install locations to PATH
+            export PATH="$WORKSPACE/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+
             terraform version
 
             if command -v aws &> /dev/null; then
                 echo "✅ AWS CLI found"
                 aws --version
             else
-                echo "❌ AWS CLI not found"
-                exit 1
+                echo "❌ AWS CLI not found - attempting to locate..."
+                AWS_PATH=$(find /usr/local /opt/homebrew /home /Users -name "aws" -type f 2>/dev/null | head -1)
+                if [ -n "$AWS_PATH" ]; then
+                    echo "✅ Found AWS CLI at: $AWS_PATH"
+                    ln -sf "$AWS_PATH" "$WORKSPACE/bin/aws"
+                    aws --version
+                else
+                    echo "❌ AWS CLI not installed. Install it with: brew install awscli"
+                    exit 1
+                fi
             fi
 
             echo "✅ All tools ready"
