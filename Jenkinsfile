@@ -34,6 +34,8 @@ pipeline {
         TF_VAR_file = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
         STATE_REPO_PATH = "../opensearch-terraform-state"
         GPG_RECIPIENT = 'myeredla@cisco.com'
+        TOOLS_PATH = "/usr/local/bin:/opt/homebrew/bin"
+        GIT_REPO = "/Users/myeredla/Documents/opensearch-ireland-infrastructure"
     }
     
     stages {
@@ -41,6 +43,7 @@ pipeline {
             steps {
                 checkout scm
                 sh '''
+                    export PATH="${TOOLS_PATH}:$PATH"
                     if [ ! -d "$STATE_REPO_PATH" ]; then
                         git clone https://github.com/manideepyeredla1326/opensearch-ireland-infrastructure.git $STATE_REPO_PATH
                     else
@@ -53,42 +56,29 @@ pipeline {
         stage('Setup Tools') {
             steps {
                 sh '''
-                    export PATH="$WORKSPACE/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+                    export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+                    echo "Verifying tools..."
 
                     if ! command -v terraform &> /dev/null; then
-                        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-                        ARCH=$(uname -m)
-                        if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
-                        if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
-
-                        TF_ZIP="terraform_1.9.8_${OS}_${ARCH}.zip"
-                        curl -LO "https://releases.hashicorp.com/terraform/1.9.8/${TF_ZIP}"
-                        mkdir -p "$WORKSPACE/bin"
-                        unzip -o "$TF_ZIP" -d "$WORKSPACE/bin"
-                        chmod +x "$WORKSPACE/bin/terraform"
-                        rm -f "$TF_ZIP"
+                        echo "ERROR: Terraform not found. Run: brew install terraform"
+                        exit 1
                     fi
+                    echo "terraform: $(terraform version | head -1)"
 
-                    terraform version
-
-                    if command -v aws &> /dev/null; then
-                        echo "✅ AWS CLI found"
-                        aws --version
-                    else
-                        echo "❌ AWS CLI not found in PATH, searching..."
-                        AWS_PATH=$(find /usr/local /opt/homebrew /Users/myeredla -name "aws" -type f 2>/dev/null | head -1)
-                        if [ -n "$AWS_PATH" ]; then
-                            echo "✅ Found AWS CLI at: $AWS_PATH"
-                            mkdir -p "$WORKSPACE/bin"
-                            ln -sf "$AWS_PATH" "$WORKSPACE/bin/aws"
-                            aws --version
-                        else
-                            echo "❌ AWS CLI not installed. Run: brew install awscli"
-                            exit 1
-                        fi
+                    if ! command -v aws &> /dev/null; then
+                        echo "ERROR: AWS CLI not found. Run: brew install awscli"
+                        exit 1
                     fi
+                    echo "aws: $(aws --version)"
 
-                    echo "✅ All tools ready"
+                    if ! command -v jq &> /dev/null; then
+                        echo "ERROR: jq not found. Run: brew install jq"
+                        exit 1
+                    fi
+                    echo "jq: $(jq --version)"
+
+                    echo "All tools ready"
                 '''
             }
         }
@@ -99,7 +89,8 @@ pipeline {
             }
             steps {
                 sh """
-                    export PATH="$WORKSPACE/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH"
+                    export PATH="/usr/local/bin:/opt/homebrew/bin:\$PATH"
+                    export AWS_PROFILE="${params.AWS_PROFILE}"
                     chmod +x scripts/import-existing-cluster.sh
                     ./scripts/import-existing-cluster.sh "${params.DOMAIN_NAME}" "${params.AWS_REGION}" "${env.TF_VAR_file}"
                 """
@@ -113,7 +104,7 @@ pipeline {
             steps {
                 dir('terraform') {
                     sh '''
-                        export PATH="$WORKSPACE/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+                        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
                         terraform init -input=false
                     '''
                 }
@@ -126,6 +117,7 @@ pipeline {
             }
             steps {
                 sh '''
+                    export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
                     chmod +x scripts/validate-deployment.sh
                     ./scripts/validate-deployment.sh
                 '''
@@ -139,7 +131,7 @@ pipeline {
             steps {
                 dir('terraform') {
                     sh '''
-                        export PATH="$WORKSPACE/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+                        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
                         terraform plan \
                             -var-file="../${TF_VAR_file}" \
                             -out=tfplan \
@@ -172,12 +164,13 @@ pipeline {
                     if (userInput) {
                         dir('terraform') {
                             sh '''
-                                export PATH="$WORKSPACE/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+                                export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
                                 terraform apply -input=false tfplan
                             '''
                         }
                         
                         sh '''
+                            export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
                             chmod +x scripts/backup-state-to-github.sh
                             ./scripts/backup-state-to-github.sh
                         '''
@@ -192,6 +185,7 @@ pipeline {
             }
             steps {
                 sh '''
+                    export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
                     chmod +x scripts/backup-state-to-github.sh
                     ./scripts/backup-state-to-github.sh
                 '''
@@ -208,7 +202,7 @@ pipeline {
         success {
             script {
                 if (params.OPERATION == 'import') {
-                    echo "✅ OpenSearch cluster successfully imported into Terraform management"
+                    echo "OpenSearch cluster successfully imported into Terraform management"
                 }
             }
         }
