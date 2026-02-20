@@ -147,3 +147,10 @@ variable "aws_profile" {
   description = "AWS profile name to use"
   type        = string
 }
+
+variable "master_user_password" {
+  description = "Master user password (only used when advanced_security_enabled = true)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

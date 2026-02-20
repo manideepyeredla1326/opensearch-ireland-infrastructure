@@ -14,22 +14,16 @@ output "domain_name" {
 }
 
 output "domain_endpoint" {
-  description = "Domain-specific endpoint used to submit index, search, and data upload requests"
+  description = "Domain-specific endpoint for submitting requests"
   value       = aws_opensearch_domain.main.endpoint
 }
 
-output "kibana_endpoint" {
-  description = "Domain-specific endpoint for Kibana without https scheme"
-  value       = aws_opensearch_domain.main.kibana_endpoint
+output "dashboard_endpoint" {
+  description = "Domain-specific endpoint for OpenSearch Dashboards"
+  value       = aws_opensearch_domain.main.dashboard_endpoint
 }
 
 output "custom_endpoint" {
   description = "Custom endpoint for the OpenSearch domain"
   value       = var.custom_endpoint_enabled ? "https://${var.custom_endpoint}" : null
-}
-
-output "master_user_secret_arn" {
-  description = "ARN of the secret containing master user credentials"
-  value       = aws_secretsmanager_secret.master_credentials.arn
-  sensitive   = true
 }
