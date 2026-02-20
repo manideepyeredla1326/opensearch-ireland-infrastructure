@@ -409,8 +409,36 @@ tags = {}"""
 
                         env.PLAN_EXIT_CODE = planExit.toString()
 
-                        def planText       = readFile('/tmp/tf-plan.txt')
+                        def planText = readFile('/tmp/tf-plan.txt')
                         env.HAS_DESTRUCTIVE = (planText.contains('will be destroyed') || planText.contains('must be replaced')).toString()
+
+                        // ── Blue-Green Detection ──────────────────────────────
+                        // These OpenSearch attributes trigger a blue-green
+                        // deployment when changed (causes ~15-30 min downtime)
+                        def blueGreenAttrs = [
+                            'instance_type',
+                            'instance_count',
+                            'dedicated_master_enabled',
+                            'dedicated_master_type',
+                            'dedicated_master_count',
+                            'zone_awareness_enabled',
+                            'availability_zone_count',
+                            'warm_enabled',
+                            'warm_type',
+                            'warm_count',
+                            'engine_version',
+                            'volume_type',
+                            'subnet_ids',
+                            'vpc_options'
+                        ]
+                        def blueGreenTriggered = blueGreenAttrs.findAll { attr ->
+                            planText.contains("+ ${attr}") ||
+                            planText.contains("- ${attr}") ||
+                            planText.contains("~ ${attr}")
+                        }
+                        env.BLUE_GREEN_REQUIRED = blueGreenTriggered.isEmpty() ? 'false' : 'true'
+                        env.BLUE_GREEN_ATTRS    = blueGreenTriggered.join(', ')
+                        // ─────────────────────────────────────────────────────
 
                         def summary = sh(
                             script: "grep -E '^Plan:|^No changes' /tmp/tf-plan.txt || true",
@@ -423,6 +451,12 @@ tags = {}"""
                             echo "📋 ${summary}"
                             if (env.HAS_DESTRUCTIVE == 'true') {
                                 echo "⚠️  WARNING: Plan contains DESTRUCTIVE changes (destroy / must-replace)!"
+                            }
+                            if (env.BLUE_GREEN_REQUIRED == 'true') {
+                                echo "🔵🟢 BLUE-GREEN DEPLOYMENT REQUIRED — changing: ${env.BLUE_GREEN_ATTRS}"
+                                echo "     Expect ~15-30 minutes of processing time and possible endpoint interruption."
+                            } else {
+                                echo "✅ No blue-green deployment required — change is in-place"
                             }
                         } else {
                             error("Terraform plan failed with exit code ${planExit} — review output above")
@@ -453,17 +487,23 @@ tags = {}"""
                         returnStdout: true
                     ).trim()
 
-                    def isDestructive = env.HAS_DESTRUCTIVE == 'true'
+                    def isDestructive  = env.HAS_DESTRUCTIVE    == 'true'
+                    def isBlueGreen    = env.BLUE_GREEN_REQUIRED == 'true'
 
-                    def confirmMsg = isDestructive
-                        ? "⚠️  DESTRUCTIVE CHANGES DETECTED\n${summary}\n\nSome resources will be DESTROYED or REPLACED — this may cause downtime."
-                        : "✅ Safe to apply\n${summary}"
+                    def blueGreenNote = isBlueGreen
+                        ? "\n\n🔵🟢 BLUE-GREEN DEPLOYMENT: changing [${env.BLUE_GREEN_ATTRS}]\n   Expect ~15-30 min processing time and possible endpoint interruption."
+                        : "\n\n✅ No blue-green required — in-place change only."
 
-                    def confirmLabel = isDestructive
-                        ? '⚠️  I understand resources will be destroyed/replaced — proceed anyway'
-                        : 'Confirm — apply these changes now'
+                    def destructiveNote = isDestructive
+                        ? "\n\n⚠️  DESTRUCTIVE: resources will be DESTROYED or REPLACED."
+                        : ""
 
-                    // Proceed button = apply, Abort button = cancel (no extra checkbox needed)
+                    def confirmMsg   = "${summary}${blueGreenNote}${destructiveNote}"
+                    def confirmLabel = (isDestructive || isBlueGreen)
+                        ? '⚠️  I accept the impact — apply now'
+                        : '✅ Apply changes now'
+
+                    // Proceed button = apply, Abort button = cancel
                     input(
                         id: 'ConfirmApply',
                         message: confirmMsg,
