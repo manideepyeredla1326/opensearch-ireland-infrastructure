@@ -44,7 +44,7 @@ pipeline {
                     if [ ! -d "$STATE_REPO_PATH" ]; then
                         git clone https://github.com/manideepyeredla1326/opensearch-ireland-infrastructure.git $STATE_REPO_PATH
                     else
-                        cd $STATE_REPO_PATH && git pull origin main
+                        cd $STATE_REPO_PATH && git config pull.rebase false && git pull origin main
                     fi
                 '''
             }
