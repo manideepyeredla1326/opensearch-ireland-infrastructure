@@ -295,29 +295,22 @@ tags = {}"""
                     }
 
                     def modeLabel = env.CLUSTER_MODE ? env.CLUSTER_MODE : 'new'
-                    def editResult = input(
+                    // input() with a single parameter returns the value directly (not a map)
+                    def tfvarsContent = input(
                         id: 'EditParameters',
-                        message: "📝 Review & Edit Parameters — '${params.DOMAIN_NAME}' (${modeLabel} cluster)\nEdit the tfvars below, then check CONFIRM to proceed:",
+                        message: "📝 Review & Edit Parameters — '${params.DOMAIN_NAME}' (${modeLabel} cluster)\nEdit the tfvars below, then click 'Save & Continue':",
+                        ok: 'Save & Continue',
                         parameters: [
                             text(
                                 name: 'TFVARS_CONTENT',
                                 defaultValue: currentContent,
-                                description: 'Full tfvars content — edit any values before applying. Changes here override the file.'
-                            ),
-                            booleanParam(
-                                name: 'CONFIRM',
-                                defaultValue: false,
-                                description: '✅ I have reviewed all parameters and want to proceed'
+                                description: 'Full tfvars content — edit any values before applying. Click Abort to cancel.'
                             )
                         ]
                     )
 
-                    if (!editResult.CONFIRM) {
-                        error('Operation cancelled — parameters were not confirmed.')
-                    }
-
                     // Write the edited content back to the tfvars file
-                    writeFile(file: env.TF_VAR_file, text: editResult.TFVARS_CONTENT)
+                    writeFile(file: env.TF_VAR_file, text: tfvarsContent)
                     echo "=== Final Parameters Written to ${env.TF_VAR_file} ==="
                     sh "cat '${env.TF_VAR_file}'"
                 }
@@ -470,21 +463,12 @@ tags = {}"""
                         ? '⚠️  I understand resources will be destroyed/replaced — proceed anyway'
                         : 'Confirm — apply these changes now'
 
-                    def proceed = input(
+                    // Proceed button = apply, Abort button = cancel (no extra checkbox needed)
+                    input(
                         id: 'ConfirmApply',
                         message: confirmMsg,
-                        parameters: [
-                            booleanParam(
-                                name: 'PROCEED',
-                                defaultValue: false,
-                                description: confirmLabel
-                            )
-                        ]
+                        ok: confirmLabel
                     )
-
-                    if (!proceed) {
-                        error('Apply cancelled at final confirmation.')
-                    }
                 }
             }
         }
