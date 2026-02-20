@@ -34,7 +34,7 @@ pipeline {
         TF_VAR_file = "regions/${params.AWS_REGION}/${params.DOMAIN_NAME}.tfvars"
         STATE_REPO_PATH = "../opensearch-terraform-state"
         GPG_RECIPIENT = 'myeredla@cisco.com'
-        PATH = "/tmp/terraform-bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
     }
     
     stages {
@@ -54,14 +54,10 @@ pipeline {
         stage('Setup Tools') {
             steps {
                 sh '''
-                    if ! command -v terraform &> /dev/null; then
-                        mkdir -p /tmp/terraform-bin
-                        rm -f /tmp/terraform_1.6.0_darwin_amd64.zip /tmp/terraform-bin/terraform
-                        /opt/homebrew/bin/wget -O /tmp/terraform_1.6.0_darwin_amd64.zip https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_darwin_amd64.zip
-                        unzip -o /tmp/terraform_1.6.0_darwin_amd64.zip -d /tmp/terraform-bin
-                        export PATH=/tmp/terraform-bin:$PATH
-                    fi
+                    echo "Terraform: $(which terraform)"
                     terraform version
+                    echo "AWS CLI: $(which aws)"
+                    aws --version
                 '''
             }
         }
