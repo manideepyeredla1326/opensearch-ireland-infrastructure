@@ -121,30 +121,63 @@ pipeline {
             }
             steps {
                 script {
-                    def userInput = true
+                    def applyDomain  = params.DOMAIN_NAME
+                    def applyRegion  = params.AWS_REGION
+                    def applyProfile = params.AWS_PROFILE
+
                     if (!params.AUTO_APPROVE) {
-                        userInput = input(
+                        def userInput = input(
                             id: 'Proceed',
-                            message: 'Apply changes to OpenSearch cluster?',
+                            message: 'Review and edit parameters before applying to OpenSearch cluster:',
                             parameters: [
-                                [$class: 'BooleanParameterDefinition',
-                                 defaultValue: false,
-                                 description: 'Proceed with apply',
-                                 name: 'Apply']
+                                string(
+                                    name: 'DOMAIN_NAME',
+                                    defaultValue: params.DOMAIN_NAME,
+                                    description: 'OpenSearch domain name to apply changes to'
+                                ),
+                                string(
+                                    name: 'AWS_REGION',
+                                    defaultValue: params.AWS_REGION,
+                                    description: 'AWS region (e.g. eu-west-1, us-east-1)'
+                                ),
+                                string(
+                                    name: 'AWS_PROFILE',
+                                    defaultValue: params.AWS_PROFILE,
+                                    description: 'AWS CLI profile to use for credentials'
+                                ),
+                                booleanParam(
+                                    name: 'CONFIRM',
+                                    defaultValue: false,
+                                    description: 'Check this box to confirm and proceed with apply'
+                                )
                             ]
                         )
-                    }
-                    
-                    if (userInput) {
-                        dir('terraform') {
-                            sh 'terraform apply -input=false tfplan'
+
+                        if (!userInput.CONFIRM) {
+                            error('Apply cancelled — CONFIRM was not checked.')
                         }
-                        
-                        sh '''
-                            chmod +x scripts/backup-state-to-github.sh
-                            ./scripts/backup-state-to-github.sh
-                        '''
+
+                        applyDomain  = userInput.DOMAIN_NAME
+                        applyRegion  = userInput.AWS_REGION
+                        applyProfile = userInput.AWS_PROFILE
                     }
+
+                    def tfVarFile = "regions/${applyRegion}/${applyDomain}.tfvars"
+
+                    dir('terraform') {
+                        sh """
+                            terraform plan \\
+                                -var-file="../${tfVarFile}" \\
+                                -out=tfplan \\
+                                -input=false
+                            terraform apply -input=false tfplan
+                        """
+                    }
+
+                    sh '''
+                        chmod +x scripts/backup-state-to-github.sh
+                        ./scripts/backup-state-to-github.sh
+                    '''
                 }
             }
         }
