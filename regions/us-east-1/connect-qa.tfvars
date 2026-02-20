@@ -14,8 +14,10 @@ master_instance_count = 3
 
 volume_type = "gp3"
 volume_size = 500
-iops        = 3000
-throughput  = 321
+iops        = 3100
+throughput  = 250
+
+tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
 
 ultrawarm_enabled   = false
 warm_instance_type  = ""

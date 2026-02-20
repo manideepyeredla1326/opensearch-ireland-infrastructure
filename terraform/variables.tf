@@ -154,3 +154,9 @@ variable "master_user_password" {
   sensitive   = true
   default     = ""
 }
+
+variable "tls_security_policy" {
+  description = "TLS security policy for the domain endpoint"
+  type        = string
+  default     = "Policy-Min-TLS-1-2-2019-07"
+}

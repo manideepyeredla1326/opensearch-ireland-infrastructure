@@ -173,6 +173,7 @@ pipeline {
                         ENCRYPT=\$(echo "\$D"        | jq -r '.DomainStatus.EncryptionAtRestOptions.Enabled')
                         NODE_ENC=\$(echo "\$D"       | jq -r '.DomainStatus.NodeToNodeEncryptionOptions.Enabled')
                         HTTPS=\$(echo "\$D"          | jq -r '.DomainStatus.DomainEndpointOptions.EnforceHTTPS')
+                        TLS_POLICY=\$(echo "\$D"     | jq -r '.DomainStatus.DomainEndpointOptions.TLSSecurityPolicy // "Policy-Min-TLS-1-2-2019-07"')
                         ADV_SEC=\$(echo "\$D"        | jq -r '.DomainStatus.AdvancedSecurityOptions.Enabled')
                         CUSTOM_EP=\$(echo "\$D"      | jq -r '.DomainStatus.DomainEndpointOptions.CustomEndpointEnabled // false')
                         CUSTOM_EP_VAL=\$(echo "\$D"  | jq -r '.DomainStatus.DomainEndpointOptions.CustomEndpoint // ""')
@@ -215,6 +216,7 @@ warm_instance_count = \$WARM_COUNT
 encrypt_at_rest           = \$ENCRYPT
 node_to_node_encryption   = \$NODE_ENC
 enforce_https             = \$HTTPS
+tls_security_policy       = "\$TLS_POLICY"
 advanced_security_enabled = \$ADV_SEC
 
 custom_endpoint_enabled = \$CUSTOM_EP
