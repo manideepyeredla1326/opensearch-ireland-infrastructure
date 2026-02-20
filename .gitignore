@@ -17,6 +17,7 @@ backup-*.json
 # Temporary files
 *.tmp
 *.temp
+*.zip
 
 # GPG files
 *.gpg
