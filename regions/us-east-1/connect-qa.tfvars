@@ -15,7 +15,7 @@ master_instance_count = 3
 volume_type = "gp3"
 volume_size = 500
 iops        = 3000
-throughput  = 300
+throughput  = 321
 
 ultrawarm_enabled   = false
 warm_instance_type  = ""
