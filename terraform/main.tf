@@ -20,10 +20,13 @@ resource "aws_opensearch_domain" "main" {
     dedicated_master_type    = var.master_instance_type
     dedicated_master_count   = var.master_instance_count
     
-    zone_awareness_enabled   = true
-    
-    zone_awareness_config {
-      availability_zone_count = length(var.availability_zones)
+    zone_awareness_enabled = length(var.availability_zones) > 1
+
+    dynamic "zone_awareness_config" {
+      for_each = length(var.availability_zones) > 1 ? [1] : []
+      content {
+        availability_zone_count = length(var.availability_zones)
+      }
     }
     
     // UltraWarm configuration
