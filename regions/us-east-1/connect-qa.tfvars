@@ -14,7 +14,7 @@ master_instance_count = 3
 
 volume_type = "gp3"
 volume_size = 500
-iops        = 3200
+iops        = 3300
 throughput  = 250
 
 tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
